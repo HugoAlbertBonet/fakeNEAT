@@ -4,6 +4,8 @@ import numpy as np
 from dataclasses import dataclass
 from sklearn import datasets
 from torch.nn import functional as F
+import random
+import copy
 
 def shuffle(a, b, seed):
    rand_state = np.random.RandomState(seed)
@@ -13,6 +15,14 @@ def shuffle(a, b, seed):
 
 @dataclass
 class Config:
+
+    proportion_train = 0.2
+    proportion_val = 0.6
+    hidden_layers = 10
+    population_size = 100
+    num_generations = 10000
+    mutation_rate = 0.05
+
     data, target = np.float32(datasets.load_iris().data), datasets.load_iris().target
     shuffle(data, target, 42)
     data, target = torch.from_numpy(data), torch.from_numpy(target)
@@ -26,11 +36,9 @@ class Config:
         out_size = 1
     else:
         out_size = target.shape[1]
-    hidden_layers = 10
-    population_size = 100
-    splits = {"train": (data[:int(0.3*len(data))], target[:int(0.3*len(target))]),
-              "val": (data[int(0.3*len(data)): int(0.6*len(data))], target[int(0.3*len(target)): int(0.6*len(target))]),
-              "test": (data[int(0.6*len(data)):], target[int(0.6*len(target)):])}
+    splits = {"train": (data[:int(proportion_train*len(data))], target[:int(proportion_train*len(target))]),
+              "val": (data[int(proportion_train*len(data)): int((proportion_train + proportion_val)*len(data))], target[int(proportion_train*len(target)): int((proportion_train + proportion_val)*len(target))]),
+              "test": (data[int((proportion_train + proportion_val)*len(data)):], target[int((proportion_train + proportion_val)*len(target)):])}
 
     #evaluation parameters
     eval_iters = 100
@@ -59,7 +67,7 @@ class Network(nn.Module):
     def __init__(self):
         super().__init__()
         self.in_layer = LinearModule(Config.in_size)
-        self.module_list = nn.ModuleList([LinearModule() for i in range(Config.hidden_layers)])
+        self.module_list = nn.ModuleList([LinearModule() for i in range(Config.hidden_layers-1)])
         self.out_layer = nn.Linear(1, Config.out_size, bias = False)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(1)
@@ -109,7 +117,7 @@ def get_batch(split):
     
 
 @torch.no_grad()
-def fitness(indiv, split, acc = False): 
+def evaluate_fitness(indiv, split, acc = False): 
     out = {}
     indiv.network.eval() #sets to evaluation phase, with our model it does nothing
     losses = torch.zeros(Config.eval_iters)
@@ -122,7 +130,63 @@ def fitness(indiv, split, acc = False):
     return out
 
 def evaluate_population(population, split = "val"):
-    return [fitness(indiv, split) for indiv in population]
+    return [evaluate_fitness(indiv, split) for indiv in population]
+
+def mutation_add_neuron(individual):
+
+    indiv = copy.deepcopy(individual)
+
+    idx = random.randint(0, Config.hidden_layers-1)
+    indiv.gen[idx] += 1
+
+    if idx == Config.hidden_layers-1:
+        indiv.network.out_layer.in_features = indiv.gen[idx]
+        j, i = indiv.network.out_layer.weight.shape
+        indiv.network.out_layer.weight = nn.Parameter(torch.cat((indiv.network.out_layer.weight, torch.rand(j, 1)), dim = 1))
+    else:
+        indiv.network.module_list[idx].linear.in_features = indiv.gen[idx]
+        j, i = indiv.network.module_list[idx].linear.weight.shape
+        indiv.network.module_list[idx].linear.weight = nn.Parameter(torch.cat((indiv.network.module_list[idx].linear.weight, torch.rand(j, 1)), dim = 1))
+    if idx == 0:
+        j, i = indiv.network.in_layer.linear.weight.shape
+        indiv.network.in_layer.linear.out_features = indiv.gen[idx]
+        indiv.network.in_layer.linear.weight = nn.Parameter(torch.cat((indiv.network.in_layer.linear.weight, torch.rand(1, i)), dim = 0))
+    else:
+        j, i = indiv.network.module_list[idx-1].linear.weight.shape
+        indiv.network.module_list[idx-1].linear.out_features = indiv.gen[idx]
+        indiv.network.module_list[idx-1].linear.weight = nn.Parameter(torch.cat((indiv.network.module_list[idx-1].linear.weight, torch.rand(1, i)), dim = 0))
+
+    return indiv
+
+def crossover(parent1, parent2):
+    pass
+
+def best_selection(fitness):
+    suma = np.sum(fitness)
+    max_fitness = np.max(fitness)
+    min_fitness = np.min(fitness)
+    selected = []
+    for i in range(int(Config.mutation_rate*Config.population_size)):
+        while True:
+            idx = random.randint(0, len(fitness)-1)
+            if idx not in selected and random.random() < (min_fitness + max_fitness - fitness[idx])/suma:
+                selected.append(idx)
+                break
+    return selected
+
+def worst_selection(fitness):
+    suma = np.sum(fitness)
+    selected = []
+    for i in range(int(Config.mutation_rate*Config.population_size)):
+        while True:
+            idx = random.randint(0, len(fitness)-1)
+            if idx not in selected and random.random() < fitness[idx]/suma:
+                selected.append(idx)
+                break
+    return selected
+
+def delete_worst(selected):
+    pass
 
 
 
@@ -131,14 +195,21 @@ def evaluate_population(population, split = "val"):
 ##############################
 
 if __name__ == "__main__":
-    individual = Individual()
-    iris = datasets.load_iris()
-    #print(individual.network.module_list[0].linear.weight)
-    iris.data= np.float32(iris.data)
-    #print(iris.data.shape, Config.data.shape)
-    x, y = get_batch("train")
-    print(x.shape, y.shape)
-    #print(individual.network)
-    print(fitness(individual, "train"))
+    population = create_population()
+    fitness = evaluate_population(population)
+
+    best_selected = best_selection(fitness)
+    new_individuals = [mutation_add_neuron(population[i]) for i in best_selected]
+    new_fitness = evaluate_population(new_individuals)
+
+    population = population + new_individuals
+    fitness = fitness + new_fitness
+
+    worst_selected = worst_selection(fitness)
+    delete_worst(worst_selected)
+
+
+
+
 
     
