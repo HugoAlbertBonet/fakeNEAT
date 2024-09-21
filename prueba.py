@@ -306,6 +306,3 @@ if __name__ == "__main__":
               - Time spent comparing new-best: {t7-t6}
               - Time spent on Worst Selection: {t9-t8}
               - Time spent on deletion: {t10-t9}""")
-
-
-    
