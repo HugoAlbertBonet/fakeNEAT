@@ -254,7 +254,33 @@ def compare_best(new_fit, best_fit, new_pop, best_pop):
     return [copy.deepcopy(f) for f in fit[:len(best_fit)]], [copy.deepcopy(pop[i]) for i in indices[:len(best_fit)]]
 
 
+def crossover_encoder_decoder(parent1, parent2):
+    """
+    Combines the first part of a parent (encoder) with the second part of the other parent (decoder), and viceversa
+    """
+    parent1, parent2 = copy.deepcopy(parent1), copy.deepcopy(parent2)
+    child1, child2 = Individual(), Individual()
+    indices = []
+    for i in range(len(parent1.gen)):
+        if parent1.gen[i] == parent2.gen[i]:
+            indices.append(i)
+    if len(indices) >0:
+        idx = indices[random.randint(0, len(indices)-1)]
+        child1.gen = parent1.gen[:idx] + parent2.gen[idx:]
+        child2.gen = parent2.gen[:idx] + parent1.gen[idx:]
 
+        child1.network.in_layer = parent1.network.in_layer
+        child2.network.in_layer = parent2.network.in_layer
+        if idx > 0:
+            child1.network.module_list = parent1.network.module_list[:idx] + parent2.network.module_list[idx:]
+            child2.network.module_list = parent2.network.module_list[:idx] + parent1.network.module_list[idx:]
+        else: 
+            child1.network.module_list = parent2.network.module_list
+            child2.network.module_list = parent1.network.module_list
+        child1.network.out_layer = parent1.network.out_layer
+        child2.network.out_layer = parent2.network.out_layer
+
+    return child1, child2
 
 
 ##############################
@@ -262,6 +288,9 @@ def compare_best(new_fit, best_fit, new_pop, best_pop):
 ##############################
 
 if __name__ == "__main__":
-    population = create_population()
-    fitness, suma, max_fitness, min_fitness, best_fitness, best_population = evaluate_population(population, top_n = True)
-    print(population[0].network.in_layer.linear.weight == copy.deepcopy(population[0]).network.in_layer.linear.weight)
+    population = [Individual(), Individual()]
+    child1, child2 = crossover_encoder_decoder(*population)
+    print(child1.network)
+    print(child2.network)
+    print(population[0].network)
+    print(population[1].network)

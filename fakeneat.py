@@ -32,9 +32,10 @@ class Config:
     population_size = 100
     num_generations = 10000
     mutation_rate = 0.1
-    top_n = int(population_size*mutation_rate)
+    top_n = 3 #int(population_size*mutation_rate)
     survivors = int(0.5*population_size)
-    destruction_iters = 100
+    destruction_iters = 500
+    crossovers = 1
 
     data, target = np.float32(datasets.load_iris().data), datasets.load_iris().target
     shuffle(data, target, 42)
@@ -180,15 +181,21 @@ def evaluate_population(population: list, suma:float = 0, max_fitness:float = 0,
         return res, suma, max_fitness, min_fitness, best_fitness, best_population, indices
     return res, suma, max_fitness, min_fitness
 
-def mutation_add_neuron(individual:Individual):
+def mutation_add_neuron(individual:Individual, index = None, new = None):
     """
     Adds a random number of neurons to a random hidden layer of the individual and returns the mutated neural network
     """
 
     indiv = copy.deepcopy(individual)
 
-    idx = random.randint(0, Config.hidden_layers-1)
-    new_neurons = random.randint(1, 10)
+    if index is None:
+        idx = random.randint(0, Config.hidden_layers-1)
+    else:
+        idx = index
+    if new is None:
+        new_neurons = random.randint(1, 10)
+    else:
+        new_neurons = new
     indiv.gen[idx] += new_neurons
 
     if idx == Config.hidden_layers-1:
@@ -267,17 +274,42 @@ def crossover_encoder_decoder(parent1, parent2):
     for i in range(len(parent1.gen)):
         if parent1.gen[i] == parent2.gen[i]:
             indices.append(i)
-    idx = indices[random.randint(0, len(indices)-1)]
-    child1.gen = parent1.gen[:idx] + parent2.gen[idx]
-    child2.gen = parent2.gen[:idx] + parent1.gen[idx]
+    if len(indices) >0:
+        idx = indices[random.randint(0, len(indices)-1)]
+        child1.gen = parent1.gen[:idx] + parent2.gen[idx:]
+        child2.gen = parent2.gen[:idx] + parent1.gen[idx:]
 
-    child1.network.in_layer = parent1.network.in_layer
-    child2.network.in_layer = parent2.network.in_layer
-    if idx > 0:
-        child1.network.module_list = parent1.network.module_list[:idx] + parent2.network.module_list[idx:]
-        child2.network.module_list = parent2.network.module_list[:idx] + parent1.network.module_list[idx:]
-    child1.network.out_layer = parent1.network.out_layer
-    child2.network.out_layer = parent2.network.out_layer
+        child1.network.in_layer = parent1.network.in_layer
+        child2.network.in_layer = parent2.network.in_layer
+        if idx > 0:
+            child1.network.module_list = parent1.network.module_list[:idx] + parent2.network.module_list[idx:]
+            child2.network.module_list = parent2.network.module_list[:idx] + parent1.network.module_list[idx:]
+        else: 
+            child1.network.module_list = parent2.network.module_list
+            child2.network.module_list = parent1.network.module_list
+        child1.network.out_layer = parent2.network.out_layer
+        child2.network.out_layer = parent1.network.out_layer
+    else:
+        idx = random.randint(0, len(parent1.gen)-1)
+        if parent1.gen[idx] > parent2.gen[idx]:
+            parent2 = mutation_add_neuron(parent2, idx, parent1.gen[idx] - parent2.gen[idx])
+        elif parent2.gen[idx] > parent1.gen[idx]:
+            parent1 = mutation_add_neuron(parent1, idx, parent2.gen[idx] - parent1.gen[idx])
+        child1.gen = parent1.gen[:idx] + parent2.gen[idx:]
+        child2.gen = parent2.gen[:idx] + parent1.gen[idx:]
+
+        child1.network.in_layer = parent1.network.in_layer
+        child2.network.in_layer = parent2.network.in_layer
+        if idx > 0:
+            child1.network.module_list = parent1.network.module_list[:idx] + parent2.network.module_list[idx:]
+            child2.network.module_list = parent2.network.module_list[:idx] + parent1.network.module_list[idx:]
+        else: 
+            child1.network.module_list = parent2.network.module_list
+            child2.network.module_list = parent1.network.module_list
+        child1.network.out_layer = parent2.network.out_layer
+        child2.network.out_layer = parent1.network.out_layer
+
+
 
     return child1, child2
 
@@ -287,7 +319,7 @@ def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size)
     return sorted(selected.tolist(), reverse= True)
 
 def worst_selection(fitness, suma, min_fitness):
-    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness) for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size))
+    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness) for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size) + 2*Config.crossovers)
     return sorted(selected.tolist(), reverse= True)
 
 def delete_worst(selected, population, fitness, suma):
@@ -309,7 +341,7 @@ def compare_best(new_fit, best_fit, new_pop, best_pop):
 
 def destruct_population(population, fitness):
     survivor_indices = random.sample(range(len(population)), Config.survivors)
-    return [copy.deepcopy(population[i]) for i in survivor_indices], [fitness[i] for i in survivor_indices]
+    return [population[i] for i in survivor_indices], [fitness[i] for i in survivor_indices]
 
 
 
@@ -327,11 +359,20 @@ if __name__ == "__main__":
         population[i] = population[-1]
         fitness.pop()
         population.pop()
+
     for i in range(Config.num_generations): 
+
+        new_individuals = []
+        tcross1 = time.time()
+        for _ in range(Config.crossovers):
+            parents_indices = best_selection(fitness + best_fitness, n = 2)
+            child1, child2 = crossover_encoder_decoder(*((population + best_population)[i] for i in parents_indices))
+            new_individuals = new_individuals + [child1, child2]
+        
         t1 = time.time()
         best_selected = best_selection(fitness + best_fitness)
         t2 = time.time()
-        new_individuals = [mutation_add_neuron((population + best_population)[i]) for i in best_selected]
+        new_individuals = new_individuals + [mutation_add_neuron((population + best_population)[i]) for i in best_selected]
         t3 = time.time()
         best_selected = best_selection(fitness + best_fitness)
         t4 = time.time()
@@ -365,6 +406,7 @@ if __name__ == "__main__":
                 print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst fitness: {max_fitness:.2f}, {len(population)}, {best_fitness}")
             if Config.verbose > 2:
                 print(f"""Time Analysis:
+              - Time spent on Crossover: {t1-tcross1:.4f}
               - Time spent on First Selection: {t2-t1:.4f}
               - Time spent on Adding Neurons: {t3-t2:.4f}
               - Time spent on Removing Neurons: {t5-t4:.4f}
