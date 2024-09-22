@@ -264,45 +264,4 @@ def compare_best(new_fit, best_fit, new_pop, best_pop):
 if __name__ == "__main__":
     population = create_population()
     fitness, suma, max_fitness, min_fitness, best_fitness, best_population = evaluate_population(population, top_n = True)
-    for i in range(Config.num_generations): 
-        t1 = time.time()
-        best_selected = best_selection(fitness)
-        t2 = time.time()
-        new_individuals = [mutation_add_neuron(population[i]) for i in best_selected]
-        t3 = time.time()
-        best_selected = best_selection(fitness)
-        t4 = time.time()
-        new_individuals = new_individuals + [mutation_mini_train(population[i]) for i in best_selected]
-        t5 = time.time()
-        new_fitness, suma, max_fitness, min_fitness = evaluate_population(new_individuals, suma, max_fitness, min_fitness)
-        t6 = time.time()
-        best_fitness, best_population = compare_best(new_fitness, best_fitness, new_individuals, best_population )
-        t7 = time.time()
-
-        population = population + new_individuals
-        fitness = fitness + new_fitness
-
-        t8 = time.time()
-        worst_selected = worst_selection(fitness, suma, min_fitness)
-        t9 = time.time()
-        suma = delete_worst(worst_selected, population, fitness, suma)
-        t10 = time.time()
-        population = population + best_population
-        fitness = fitness + best_fitness
-        max_fitness = np.max(fitness)
-        min_fitness = np.min(fitness)
-
-        if Config.verbose == 1:
-            print(f"End of generation {i+1}, best fitness: {min_fitness:2f}, worst fitness: {max_fitness:2f}, {len(population)}", end = "\r")
-        else:
-            if Config.verbose > 1:
-                print(f"End of generation {i+1}, best fitness: {min_fitness:2f}, worst fitness: {max_fitness:2f}, {len(population)}, {best_fitness}")
-            if Config.verbose > 2:
-                print(f"""Time Analysis:
-              - Time spent on First Selection: {t2-t1}
-              - Time spent on Adding Neurons: {t3-t2}
-              - Time spent on Mini Train: {t5-t4}
-              - Time spent on evaluating new population: {t6-t5}
-              - Time spent comparing new-best: {t7-t6}
-              - Time spent on Worst Selection: {t9-t8}
-              - Time spent on deletion: {t10-t9}""")
+    print(population[0].network.in_layer.linear.weight == copy.deepcopy(population[0]).network.in_layer.linear.weight)

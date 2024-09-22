@@ -23,15 +23,18 @@ class Config:
     - The process of training and evaluation
     """
 
-    verbose = 1
+    verbose = 3
 
-    proportion_train = 0.3
-    proportion_val = 0.5
+    proportion_train = 0.5
+    proportion_val = 0.4
     hidden_layers = 10
+    max_neurons = 500
     population_size = 100
     num_generations = 10000
     mutation_rate = 0.1
     top_n = int(population_size*mutation_rate)
+    survivors = int(0.5*population_size)
+    destruction_iters = 100
 
     data, target = np.float32(datasets.load_iris().data), datasets.load_iris().target
     shuffle(data, target, 42)
@@ -52,12 +55,12 @@ class Config:
 
     #training parameters
     learning_rate = 0.01
-    train_iters = 5
+    train_iters = 1
 
     #evaluation parameters
-    eval_iters = 5
-    batch_size = {"train": 32,
-                  "val": 32,
+    eval_iters = 1
+    batch_size = {"train": 64,
+                  "val": 64,
                   "test": 32}
 
 
@@ -69,9 +72,9 @@ class Config:
 ##############################
 
 class LinearModule(nn.Module):
-    def __init__(self, in_size= 1):
+    def __init__(self, in_size= 1, out_size = 1):
         super().__init__()
-        self.linear = nn.Linear(in_size, 1, bias=False)
+        self.linear = nn.Linear(in_size, out_size, bias=False)
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -80,11 +83,11 @@ class LinearModule(nn.Module):
         return x
 
 class Network(nn.Module):
-    def __init__(self):
+    def __init__(self, gen):
         super().__init__()
-        self.in_layer = LinearModule(Config.in_size)
-        self.module_list = nn.ModuleList([LinearModule() for i in range(Config.hidden_layers-1)])
-        self.out_layer = nn.Linear(1, Config.out_size, bias = False)
+        self.in_layer = LinearModule(in_size= Config.in_size, out_size=gen[0])
+        self.module_list = nn.ModuleList([LinearModule(in_size = gen[i], out_size= gen[i+1]) for i in range(Config.hidden_layers-1)])
+        self.out_layer = nn.Linear(gen[-1], Config.out_size, bias = False)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(1)
 
@@ -110,8 +113,8 @@ class Network(nn.Module):
 
 class Individual:
     def __init__(self):
-        self.network = Network()
-        self.gen = [1 for i in range(Config.hidden_layers)]
+        self.gen = [random.randint(1, Config.max_neurons) for i in range(Config.hidden_layers)]
+        self.network = Network(self.gen)
         self.fitness = 0
 
     def __call__(self, x, targets = None):
@@ -122,11 +125,11 @@ class Individual:
 ###############################
 
 
-def create_population():
+def create_population(n = Config.population_size):
     """
     Creates a population of neural networks
     """
-    return [Individual() for i in range(Config.population_size)]
+    return [Individual() for i in range(n)]
 
 def get_batch(split: {"train", "val", "test"}):
     """
@@ -172,35 +175,38 @@ def evaluate_population(population: list, suma:float = 0, max_fitness:float = 0,
         if fit < min_fitness: min_fitness = fit
     if top_n:
         indices = sorted(range(len(res)), key=lambda i: res[i], reverse=True)[:Config.top_n]
-        return res, suma, max_fitness, min_fitness, [copy.deepcopy(res[i]) for i in indices], [copy.deepcopy(population[i]) for i in indices]
+        best_fitness = [copy.deepcopy(res[i]) for i in indices]
+        best_population = [copy.deepcopy(population[i]) for i in indices]
+        return res, suma, max_fitness, min_fitness, best_fitness, best_population, indices
     return res, suma, max_fitness, min_fitness
 
 def mutation_add_neuron(individual:Individual):
     """
-    Adds a neuron to a random hidden layer of the individual and returns the mutated neural network
+    Adds a random number of neurons to a random hidden layer of the individual and returns the mutated neural network
     """
 
     indiv = copy.deepcopy(individual)
 
     idx = random.randint(0, Config.hidden_layers-1)
-    indiv.gen[idx] += 1
+    new_neurons = random.randint(1, 10)
+    indiv.gen[idx] += new_neurons
 
     if idx == Config.hidden_layers-1:
         indiv.network.out_layer.in_features = indiv.gen[idx]
         j, i = indiv.network.out_layer.weight.shape
-        indiv.network.out_layer.weight = nn.Parameter(torch.cat((indiv.network.out_layer.weight, torch.rand(j, 1)), dim = 1))
+        indiv.network.out_layer.weight = nn.Parameter(torch.cat((indiv.network.out_layer.weight, torch.rand(j, new_neurons)), dim = 1))
     else:
         indiv.network.module_list[idx].linear.in_features = indiv.gen[idx]
         j, i = indiv.network.module_list[idx].linear.weight.shape
-        indiv.network.module_list[idx].linear.weight = nn.Parameter(torch.cat((indiv.network.module_list[idx].linear.weight, torch.rand(j, 1)), dim = 1))
+        indiv.network.module_list[idx].linear.weight = nn.Parameter(torch.cat((indiv.network.module_list[idx].linear.weight, torch.rand(j, new_neurons)), dim = 1))
     if idx == 0:
         j, i = indiv.network.in_layer.linear.weight.shape
         indiv.network.in_layer.linear.out_features = indiv.gen[idx]
-        indiv.network.in_layer.linear.weight = nn.Parameter(torch.cat((indiv.network.in_layer.linear.weight, torch.rand(1, i)), dim = 0))
+        indiv.network.in_layer.linear.weight = nn.Parameter(torch.cat((indiv.network.in_layer.linear.weight, torch.rand(new_neurons, i)), dim = 0))
     else:
         j, i = indiv.network.module_list[idx-1].linear.weight.shape
         indiv.network.module_list[idx-1].linear.out_features = indiv.gen[idx]
-        indiv.network.module_list[idx-1].linear.weight = nn.Parameter(torch.cat((indiv.network.module_list[idx-1].linear.weight, torch.rand(1, i)), dim = 0))
+        indiv.network.module_list[idx-1].linear.weight = nn.Parameter(torch.cat((indiv.network.module_list[idx-1].linear.weight, torch.rand(new_neurons, i)), dim = 0))
 
     return indiv
 
@@ -208,7 +214,33 @@ def mutation_remove_neuron(individual:Individual):
     """
     Removes a neuron from a random hidden layer without eliminating any layer and returns the mutated neural network
     """
-    pass
+     
+    indiv = copy.deepcopy(individual)
+
+    idx = random.randint(0, Config.hidden_layers-1)
+    if indiv.gen[idx] > 1:
+        new_neurons = random.randint(1, indiv.gen[idx]-1)
+        indiv.gen[idx] -= new_neurons
+        if idx == Config.hidden_layers-1:
+            indiv.network.out_layer.in_features = indiv.gen[idx]
+            j, i = indiv.network.out_layer.weight.shape
+            indiv.network.out_layer.weight = nn.Parameter(indiv.network.out_layer.weight[:, :i-new_neurons])
+        else:
+            indiv.network.module_list[idx].linear.in_features = indiv.gen[idx]
+            j, i = indiv.network.module_list[idx].linear.weight.shape
+            indiv.network.module_list[idx].linear.weight = nn.Parameter(indiv.network.module_list[idx].linear.weight[:, :i-new_neurons])
+        if idx == 0: 
+            j, i = indiv.network.in_layer.linear.weight.shape
+            indiv.network.in_layer.linear.out_features = indiv.gen[idx]
+            indiv.network.in_layer.linear.weight = nn.Parameter(indiv.network.in_layer.linear.weight[:j-new_neurons, :])
+
+        else:
+            j, i = indiv.network.module_list[idx-1].linear.weight.shape
+            indiv.network.module_list[idx-1].linear.out_features = indiv.gen[idx]
+            indiv.network.module_list[idx-1].linear.weight = nn.Parameter(indiv.network.module_list[idx-1].linear.weight[:j-new_neurons, :])
+
+    return indiv
+
 
 def mutation_mini_train(indiv:Individual):
     """
@@ -225,11 +257,30 @@ def mutation_mini_train(indiv:Individual):
         optimizer.step()
     return individual
 
-def crossover(parent1, parent2):
-    pass
+def crossover_encoder_decoder(parent1, parent2):
+    parent1, parent2 = copy.deepcopy(parent1), copy.deepcopy(parent2)
+    child1, child2 = Individual(), Individual()
+    indices = []
+    for i in range(len(parent1.gen)):
+        if parent1.gen[i] == parent2.gen[i]:
+            indices.append(i)
+    idx = indices[random.randint(0, len(indices)-1)]
+    child1.gen = parent1.gen[:idx] + parent2.gen[idx]
+    child2.gen = parent2.gen[:idx] + parent1.gen[idx]
 
-def best_selection(fitness):
-    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(1 - fit) for fit in fitness])), int(Config.mutation_rate*Config.population_size))
+    child1.network.in_layer = parent1.network.in_layer
+    child2.network.in_layer = parent2.network.in_layer
+    if idx > 0:
+        child1.network.module_list = parent1.network.module_list[:idx] + parent2.network.module_list[idx:]
+        child2.network.module_list = parent2.network.module_list[:idx] + parent1.network.module_list[idx:]
+    child1.network.out_layer = parent1.network.out_layer
+    child2.network.out_layer = parent2.network.out_layer
+
+    return child1, child2
+
+
+def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size)):
+    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(1 - fit) for fit in fitness])), n)
     return sorted(selected.tolist(), reverse= True)
 
 def worst_selection(fitness, suma, min_fitness):
@@ -251,7 +302,11 @@ def compare_best(new_fit, best_fit, new_pop, best_pop):
     ordered_list = sorted(lista)
     fit, indices = zip(*ordered_list)
     pop = new_pop+best_pop
-    return [copy.deepcopy(f) for f in fit[:len(best_fit)]], [copy.deepcopy(pop[i]) for i in indices[:len(best_fit)]]
+    return list(fit[:len(best_fit)]), [copy.deepcopy(pop[i]) for i in indices[:len(best_fit)]], list(fit[len(best_fit):]), [copy.deepcopy(pop[i]) for i in indices[len(best_fit):]]
+
+def destruct_population(population, fitness):
+    survivor_indices = random.sample(range(len(population)), Config.survivors)
+    return [copy.deepcopy(population[i]) for i in survivor_indices], [fitness[i] for i in survivor_indices]
 
 
 
@@ -263,49 +318,58 @@ def compare_best(new_fit, best_fit, new_pop, best_pop):
 
 if __name__ == "__main__":
     population = create_population()
-    fitness, suma, max_fitness, min_fitness, best_fitness, best_population = evaluate_population(population, top_n = True)
+    fitness, suma, max_fitness, min_fitness, best_fitness, best_population, indices = evaluate_population(population, top_n = True)
+    for i in sorted(indices, reverse=True):
+        fitness[i] = fitness[-1]
+        population[i] = population[-1]
+        fitness.pop()
+        population.pop()
     for i in range(Config.num_generations): 
         t1 = time.time()
-        best_selected = best_selection(fitness)
+        best_selected = best_selection(fitness + best_fitness)
         t2 = time.time()
-        new_individuals = [mutation_add_neuron(population[i]) for i in best_selected]
+        new_individuals = [mutation_add_neuron((population + best_population)[i]) for i in best_selected]
         t3 = time.time()
-        best_selected = best_selection(fitness)
+        best_selected = best_selection(fitness + best_fitness)
         t4 = time.time()
-        new_individuals = new_individuals + [mutation_mini_train(population[i]) for i in best_selected]
+        new_individuals = new_individuals + [mutation_remove_neuron((population + best_population)[i]) for i in best_selected]
         t5 = time.time()
-        new_fitness, suma, max_fitness, min_fitness = evaluate_population(new_individuals, suma, max_fitness, min_fitness)
+        best_selected = best_selection(fitness + best_fitness)
         t6 = time.time()
-        best_fitness, best_population = compare_best(new_fitness, best_fitness, new_individuals, best_population )
+        new_individuals = new_individuals + [mutation_mini_train((population + best_population)[i]) for i in best_selected]
         t7 = time.time()
+        new_fitness, suma, max_fitness, min_fitness = evaluate_population(new_individuals, suma, max_fitness, min_fitness)
+        t8 = time.time()
+        best_fitness, best_population, new_fitness, new_individuals = compare_best(new_fitness, best_fitness, new_individuals, best_population )
+        t9 = time.time()
 
         population = population + new_individuals
         fitness = fitness + new_fitness
 
-        t8 = time.time()
-        worst_selected = worst_selection(fitness, suma, min_fitness)
-        t9 = time.time()
-        suma = delete_worst(worst_selected, population, fitness, suma)
         t10 = time.time()
-        population = population + best_population
-        fitness = fitness + best_fitness
+        worst_selected = worst_selection(fitness, suma, min_fitness)
+        t11 = time.time()
+        suma = delete_worst(worst_selected, population, fitness, suma)
+        t12 = time.time()
+
         max_fitness = np.max(fitness)
-        min_fitness = np.min(fitness)
+        min_fitness = np.min(best_fitness)
 
         if Config.verbose == 1:
-            print(f"End of generation {i+1}, best fitness: {min_fitness:2f}, worst fitness: {max_fitness:2f}, {len(population)}", end = "\r")
+            print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst fitness: {max_fitness:.2f}, {len(population)}", end = "\r")
         else:
             if Config.verbose > 1:
-                print(f"End of generation {i+1}, best fitness: {min_fitness:2f}, worst fitness: {max_fitness:2f}, {len(population)}, {best_fitness}")
+                print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst fitness: {max_fitness:.2f}, {len(population)}, {best_fitness}")
             if Config.verbose > 2:
                 print(f"""Time Analysis:
-              - Time spent on First Selection: {t2-t1}
-              - Time spent on Adding Neurons: {t3-t2}
-              - Time spent on Mini Train: {t5-t4}
-              - Time spent on evaluating new population: {t6-t5}
-              - Time spent comparing new-best: {t7-t6}
-              - Time spent on Worst Selection: {t9-t8}
-              - Time spent on deletion: {t10-t9}""")
+              - Time spent on First Selection: {t2-t1:.4f}
+              - Time spent on Adding Neurons: {t3-t2:.4f}
+              - Time spent on Removing Neurons: {t5-t4:.4f}
+              - Time spent on Mini-Training: {t7-t6:.4f}
+              - Time spent on evaluating new population: {t8-t7:.4f}
+              - Time spent comparing new-best: {t9-t8:.4f}
+              - Time spent on Worst Selection: {t11-t10:.4f}
+              - Time spent on deletion: {t12-t11:.4f}""")
 
 
     
