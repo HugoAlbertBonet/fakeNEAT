@@ -258,6 +258,9 @@ def mutation_mini_train(indiv:Individual):
     return individual
 
 def crossover_encoder_decoder(parent1, parent2):
+    """
+    Combines the first part of a parent (encoder) with the second part of the other parent (decoder), and viceversa
+    """
     parent1, parent2 = copy.deepcopy(parent1), copy.deepcopy(parent2)
     child1, child2 = Individual(), Individual()
     indices = []
