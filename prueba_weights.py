@@ -39,3 +39,7 @@ if __name__ == "__main__":
     model.l2.in_features = 3
     print(model.l1.weight)
     print(model.forward(input_value))
+
+    from torchviz import make_dot
+
+    make_dot(model.forward(input_value), params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
