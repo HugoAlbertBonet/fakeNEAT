@@ -7,7 +7,8 @@ from torch.nn import functional as F
 import random
 import copy
 import time
-from multiprocessing import Pool
+import matplotlib.pyplot as plt
+import pandas as pd
 
 def shuffle(a, b, seed):
    rand_state = np.random.RandomState(seed)
@@ -24,19 +25,19 @@ class Config:
     - The process of training and evaluation
     """
 
-    verbose = 3
+    verbose = 2
 
     proportion_train = 0.5
     proportion_val = 0.4
-    hidden_layers = 10
-    max_neurons = 500
+    hidden_layers = 3
+    max_neurons = 150
     population_size = 100
     num_generations = 2000
     mutation_rate = 0.1
     top_n = 5 #int(population_size*mutation_rate)
     survivors = int(0.5*population_size)
     destruction_iters = 500
-    crossovers = 1
+    crossovers = 10
 
     data, target = np.float32(datasets.load_digits().data), datasets.load_digits().target
     shuffle(data, target, 42)
@@ -57,7 +58,7 @@ class Config:
 
     #training parameters
     learning_rate = 0.01
-    train_iters = 3
+    train_iters = 1
 
     #evaluation parameters
     eval_iters = 1
@@ -315,7 +316,7 @@ def crossover_encoder_decoder(parent1, parent2):
     return child1, child2
 
 
-def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size)):
+def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size), i = 1):
     selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(1 - fit) for fit in fitness])), n)
     return sorted(selected.tolist(), reverse= True)
 
@@ -355,6 +356,7 @@ def destruct_population(population, fitness):
 if __name__ == "__main__":
     population = create_population()
     fitness, suma, max_fitness, min_fitness, best_fitness, best_population, indices = evaluate_population(population, top_n = True)
+    best = []
     for i in sorted(indices, reverse=True):
         fitness[i] = fitness[-1]
         population[i] = population[-1]
@@ -366,20 +368,20 @@ if __name__ == "__main__":
         new_individuals = []
         tcross1 = time.time()
         for _ in range(Config.crossovers):
-            parents_indices = best_selection(fitness + best_fitness, n = 2)
+            parents_indices = best_selection(fitness + best_fitness, n = 2, i = i)
             child1, child2 = crossover_encoder_decoder(*((population + best_population)[i] for i in parents_indices))
             new_individuals = new_individuals + [child1, child2]
         
         t1 = time.time()
-        best_selected = best_selection(fitness + best_fitness)
+        best_selected = best_selection(fitness + best_fitness, i = i)
         t2 = time.time()
         new_individuals = new_individuals + [mutation_add_neuron((population + best_population)[i]) for i in best_selected]
         t3 = time.time()
-        best_selected = best_selection(fitness + best_fitness)
+        best_selected = best_selection(fitness + best_fitness, i = i)
         t4 = time.time()
         new_individuals = new_individuals + [mutation_remove_neuron((population + best_population)[i]) for i in best_selected]
         t5 = time.time()
-        best_selected = best_selection(fitness + best_fitness)
+        best_selected = best_selection(fitness + best_fitness, i = i)
         t6 = time.time()
         new_individuals = new_individuals + [mutation_mini_train((population + best_population)[i]) for i in best_selected]
         t7 = time.time()
@@ -399,6 +401,7 @@ if __name__ == "__main__":
 
         max_fitness = np.max(fitness)
         min_fitness = np.min(best_fitness)
+        best.append(min_fitness)
 
         if Config.verbose == 1:
             print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst fitness: {max_fitness:.2f}, {len(population)}", end = "\r")
@@ -417,16 +420,8 @@ if __name__ == "__main__":
               - Time spent on Worst Selection: {t11-t10:.4f}
               - Time spent on deletion: {t12-t11:.4f}""")
 
+    df = pd.DataFrame({"best fitness": best, "iteration": range(1, Config.num_generations+1)})
+    plt.plot(df["iteration"], df["best fitness"])
+    plt.savefig(f"./images/digits_hiddenlayers{Config.hidden_layers}_maxneurons{Config.max_neurons}_population_size{Config.population_size}_mutation_rate{Config.mutation_rate}_crossovers{Config.crossovers}_fitness{min_fitness}.png")
 
-
-"""from multiprocessing import Pool
-
-def method1(x):
-    print x
-    print x**2
-    return x**2
-
-p = Pool(3)
-result = p.map(method1, [1,4,9]) 
-print result  """
     
