@@ -9,6 +9,7 @@ import copy
 import time
 import matplotlib.pyplot as plt
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 def shuffle(a, b, seed):
    rand_state = np.random.RandomState(seed)
@@ -25,12 +26,12 @@ class Config:
     - The process of training and evaluation
     """
 
-    verbose = 3
+    verbose = 2
 
     proportion_train = 0.3
     proportion_val = 0.3
-    hidden_layers = 10
-    max_neurons = 500
+    hidden_layers = 4
+    max_neurons = 32
     population_size = 100
     num_generations = 1000
     mutation_rate = 0.1
@@ -39,8 +40,8 @@ class Config:
     destruction_iters = 500
     crossovers = 1
 
-    data, target = np.float32(datasets.load_breast_cancer().data), datasets.load_breast_cancer().target
-    shuffle(data, target, 42)
+    data, target = np.float32(datasets.load_wine().data), datasets.load_wine().target
+    #shuffle(data, target, 42)
     data, target = torch.from_numpy(data), torch.from_numpy(target)
     classifier = True
     onehot = False
@@ -52,10 +53,11 @@ class Config:
         out_size = 1
     else:
         out_size = target.shape[1]
-    splits = {"train": (data[:int(proportion_train*len(data))], target[:int(proportion_train*len(target))]),
-              "val": (data[int(proportion_train*len(data)): int((proportion_train + proportion_val)*len(data))], target[int(proportion_train*len(target)): int((proportion_train + proportion_val)*len(target))]),
-              "test": (data[int((proportion_train + proportion_val)*len(data)):], target[int((proportion_train + proportion_val)*len(target)):])}
-
+    splits = {"train": [0,0],
+              "val": [0,0],
+              "test": [0,0]}
+    splits["train"][0], splits["test"][0], splits["train"][1], splits["test"][1] = train_test_split(data, target, test_size= 1- proportion_train-proportion_val)
+    splits["train"][0], splits["val"][0], splits["train"][1], splits["val"][1] = train_test_split(splits["train"][0], splits["train"][1], test_size=proportion_val/(proportion_train+proportion_val))
     #training parameters
     learning_rate = 0.01
     train_iters = 1
@@ -63,8 +65,8 @@ class Config:
     #evaluation parameters
     eval_iters = 1
     batch_size = {"train": 32,
-                  "val": 64,
-                  "test": 64}
+                  "val": 32,
+                  "test": len(splits["test"][0])}
 
 
 
@@ -425,9 +427,9 @@ if __name__ == "__main__":
 
     df = pd.DataFrame({"best fitness": best, "iteration": range(1, len(best)+1)})
     plt.plot(df["iteration"], df["best fitness"])
-    plt.savefig(f"./images/cancer_hiddenlayers{Config.hidden_layers}_maxneurons{Config.max_neurons}_population_size{Config.population_size}_mutation_rate{Config.mutation_rate}_crossovers{Config.crossovers}_fitness{min_fitness}_test{min_fit_test}.png")
+    plt.savefig(f"./images/wine_hiddenlayers{Config.hidden_layers}_maxneurons{Config.max_neurons}_population_size{Config.population_size}_mutation_rate{Config.mutation_rate}_crossovers{Config.crossovers}_fitness{min_fitness}_test{min_fit_test}.png")
 
-    torch.save(best_population[0].network, f"./models/cancer_{min_fitness}.pt")
+    torch.save(best_population[0].network, f"./models/wine_{min_fitness}.pt")
     with open("./models/genes.txt", "a") as f:
-        f.write(f'cancer_{min_fitness}.pt' + ": " + str(best_population[0].gen))
+        f.write(f'wine_{min_fitness}.pt' + ": " + str(best_population[0].gen))
     
