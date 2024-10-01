@@ -320,9 +320,14 @@ def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size)
     selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(1 - fit) for fit in fitness])), n)
     return sorted(selected.tolist(), reverse= True)
 
-def worst_selection(fitness, suma, min_fitness):
-    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness)**10 for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size) + 2*Config.crossovers)
+def worst_selection1(fitness, suma, min_fitness):
+    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness) for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size) + 2*Config.crossovers)
     return sorted(selected.tolist(), reverse= True)
+
+def worst_selection2(fitness, suma, min_fitness):
+    avg = np.mean(fitness)
+    selected = [i for i in range(len(fitness)) if fitness[i] <= avg][:Config.population_size//3]
+    return sorted(selected, reverse= True)
 
 def delete_worst(selected, population, fitness, suma):
     for idx in selected:
@@ -357,6 +362,7 @@ if __name__ == "__main__":
     population = create_population()
     fitness, suma, max_fitness, min_fitness, best_fitness, best_population, indices = evaluate_population(population, top_n = True)
     best = []
+    worst_selected = []
     for i in sorted(indices, reverse=True):
         fitness[i] = fitness[-1]
         population[i] = population[-1]
@@ -364,7 +370,7 @@ if __name__ == "__main__":
         population.pop()
 
     for i in range(Config.num_generations): 
-
+        new = max(5, (Config.population_size - len(worst_selected))//3)
         new_individuals = []
         tcross1 = time.time()
         for _ in range(Config.crossovers):
@@ -373,15 +379,15 @@ if __name__ == "__main__":
             new_individuals = new_individuals + [child1, child2]
         
         t1 = time.time()
-        best_selected = best_selection(fitness + best_fitness, i = i)
+        best_selected = best_selection(fitness + best_fitness, n = new, i = i)
         t2 = time.time()
         new_individuals = new_individuals + [mutation_add_neuron((population + best_population)[i]) for i in best_selected]
         t3 = time.time()
-        best_selected = best_selection(fitness + best_fitness, i = i)
+        best_selected = best_selection(fitness + best_fitness, n = new, i = i)
         t4 = time.time()
         new_individuals = new_individuals + [mutation_remove_neuron((population + best_population)[i]) for i in best_selected]
         t5 = time.time()
-        best_selected = best_selection(fitness + best_fitness, i = i)
+        best_selected = best_selection(fitness + best_fitness, n = new, i = i)
         t6 = time.time()
         new_individuals = new_individuals + [mutation_mini_train((population + best_population)[i]) for i in best_selected]
         t7 = time.time()
@@ -394,10 +400,14 @@ if __name__ == "__main__":
         fitness = fitness + new_fitness
 
         t10 = time.time()
-        worst_selected = worst_selection(fitness, suma, min_fitness)
+        worst_selected = worst_selection1(fitness, suma, min_fitness)
         t11 = time.time()
         suma = delete_worst(worst_selected, population, fitness, suma)
         t12 = time.time()
+
+        worst_selected = worst_selection2(fitness, suma, min_fitness)
+        suma = delete_worst(worst_selected, population, fitness, suma)
+        population, fitness = population[:Config.population_size], fitness[:Config.population_size]
 
         max_fitness = np.max(fitness)
         min_fitness = np.min(best_fitness)

@@ -25,21 +25,21 @@ class Config:
     - The process of training and evaluation
     """
 
-    verbose = 2
+    verbose = 3
 
-    proportion_train = 0.5
-    proportion_val = 0.4
-    hidden_layers = 3
-    max_neurons = 150
+    proportion_train = 0.3
+    proportion_val = 0.3
+    hidden_layers = 10
+    max_neurons = 500
     population_size = 100
-    num_generations = 5000
+    num_generations = 1000
     mutation_rate = 0.1
-    top_n = 5 #int(population_size*mutation_rate)
+    top_n = 3 #int(population_size*mutation_rate)
     survivors = int(0.5*population_size)
     destruction_iters = 500
-    crossovers = 10
+    crossovers = 1
 
-    data, target = np.float32(datasets.load_digits().data), datasets.load_digits().target
+    data, target = np.float32(datasets.load_breast_cancer().data), datasets.load_breast_cancer().target
     shuffle(data, target, 42)
     data, target = torch.from_numpy(data), torch.from_numpy(target)
     classifier = True
@@ -62,8 +62,8 @@ class Config:
 
     #evaluation parameters
     eval_iters = 1
-    batch_size = {"train": 32,
-                  "val": 32,
+    batch_size = {"train": 64,
+                  "val": 64,
                   "test": 32}
 
 
@@ -316,12 +316,12 @@ def crossover_encoder_decoder(parent1, parent2):
     return child1, child2
 
 
-def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size), i = 1):
+def best_selection(fitness, n = int(Config.mutation_rate*Config.population_size)):
     selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(1 - fit) for fit in fitness])), n)
     return sorted(selected.tolist(), reverse= True)
 
 def worst_selection(fitness, suma, min_fitness):
-    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness)**10 for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size) + 2*Config.crossovers)
+    selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness) for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size) + 2*Config.crossovers)
     return sorted(selected.tolist(), reverse= True)
 
 def delete_worst(selected, population, fitness, suma):
@@ -368,20 +368,20 @@ if __name__ == "__main__":
         new_individuals = []
         tcross1 = time.time()
         for _ in range(Config.crossovers):
-            parents_indices = best_selection(fitness + best_fitness, n = 2, i = i)
+            parents_indices = best_selection(fitness + best_fitness, n = 2)
             child1, child2 = crossover_encoder_decoder(*((population + best_population)[i] for i in parents_indices))
             new_individuals = new_individuals + [child1, child2]
         
         t1 = time.time()
-        best_selected = best_selection(fitness + best_fitness, i = i)
+        best_selected = best_selection(fitness + best_fitness)
         t2 = time.time()
         new_individuals = new_individuals + [mutation_add_neuron((population + best_population)[i]) for i in best_selected]
         t3 = time.time()
-        best_selected = best_selection(fitness + best_fitness, i = i)
+        best_selected = best_selection(fitness + best_fitness)
         t4 = time.time()
         new_individuals = new_individuals + [mutation_remove_neuron((population + best_population)[i]) for i in best_selected]
         t5 = time.time()
-        best_selected = best_selection(fitness + best_fitness, i = i)
+        best_selected = best_selection(fitness + best_fitness)
         t6 = time.time()
         new_individuals = new_individuals + [mutation_mini_train((population + best_population)[i]) for i in best_selected]
         t7 = time.time()
@@ -401,14 +401,14 @@ if __name__ == "__main__":
 
         max_fitness = np.max(fitness)
         min_fitness = np.min(best_fitness)
-        avg_fitness = np.mean(fitness + best_fitness)
         best.append(min_fitness)
+        min_fit_test = evaluate_fitness(best_population[0], "test")
 
         if Config.verbose == 1:
-            print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst: {max_fitness:.2f}, mean: {avg_fitness:.2f}, {len(population)}", end = "\r")
+            print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst: {max_fitness:.2f}, best in test: {min_fit_test:.2f}, {len(population)}", end = "\r")
         else:
             if Config.verbose > 1:
-                print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst: {max_fitness:.2f}, mean: {avg_fitness:.2f}, {len(population)}, {best_fitness}")
+                print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst: {max_fitness:.2f}, best in test: {min_fit_test:.2f}, {len(population)}, {best_fitness}")
             if Config.verbose > 2:
                 print(f"""Time Analysis:
               - Time spent on Crossover: {t1-tcross1:.4f}
@@ -420,11 +420,14 @@ if __name__ == "__main__":
               - Time spent comparing new-best: {t9-t8:.4f}
               - Time spent on Worst Selection: {t11-t10:.4f}
               - Time spent on deletion: {t12-t11:.4f}""")
+        if min_fitness < 0.02: 
+            if min_fit_test < 0.1: break
 
-    df = pd.DataFrame({"best fitness": best, "iteration": range(1, Config.num_generations+1)})
+    df = pd.DataFrame({"best fitness": best, "iteration": range(1, len(best)+1)})
     plt.plot(df["iteration"], df["best fitness"])
-    plt.savefig(f"./images/digits_hiddenlayers{Config.hidden_layers}_maxneurons{Config.max_neurons}_population_size{Config.population_size}_mutation_rate{Config.mutation_rate}_crossovers{Config.crossovers}_fitness{min_fitness}.png")
+    plt.savefig(f"./images/cancer_hiddenlayers{Config.hidden_layers}_maxneurons{Config.max_neurons}_population_size{Config.population_size}_mutation_rate{Config.mutation_rate}_crossovers{Config.crossovers}_fitness{min_fitness}.png")
 
-    torch.save(best_population[0].network)
-    with open("models/genes.txt", "a") as f:
-        f.write(f'digits_{min_fitness}.pt' + ": " + best_population[0].gen)
+    torch.save(best_population[0].network, f"./models/cancer_{min_fitness}.pt")
+    with open("./models/genes.txt", "a") as f:
+        f.write(f'cancer_{min_fitness}.pt' + ": " + str(best_population[0].gen))
+    
