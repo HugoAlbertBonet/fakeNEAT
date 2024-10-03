@@ -9,6 +9,7 @@ import copy
 import time
 import matplotlib.pyplot as plt
 import pandas as pd
+import math
 
 def shuffle(a, b, seed):
    rand_state = np.random.RandomState(seed)
@@ -17,7 +18,7 @@ def shuffle(a, b, seed):
    rand_state.shuffle(b)
 
 @dataclass
-class Config:
+class ConfigNEGA:
     """
     Data class to set the parameters for:
     - The development of the genetic algorithm
@@ -25,7 +26,7 @@ class Config:
     - The process of training and evaluation
     """
 
-    verbose = 3 
+    verbose = 1
     # verbose = 0 for no text alerts
     # verbose = 1 for just one line that rewrites itself
     # verbose = 2 for just one line of text without rewriting
@@ -36,7 +37,7 @@ class Config:
     hidden_layers = 5                                   # Number of hidden layers per network
     max_neurons = 500                                   # Max number of neurons per layer in inicialization
     population_size = 100                               # Size of population
-    num_generations = 3000                              # Max number of iterations of genetic algorithm
+    num_generations = 150                              # Max number of iterations of genetic algorithm
     mutation_rate = 0.1                                 # Proportion of individuals of population suffering mutations
     top_n = 3                                           # Number of best results to keep from disappearing
     survivors = int(0.5*population_size)                # In case destruction of pupulation is implemented, how many survivors
@@ -46,6 +47,7 @@ class Config:
     limit_test = 0.06                                   # If early stopping is triggered, minimum error in test to consider successful
 
     # Loading the datasets
+    name_dataset = "iris"
     data, target = np.float32(datasets.load_iris().data), datasets.load_iris().target
     shuffle(data, target, 42) # Remove if shuffling is not necessary
     data, target = torch.from_numpy(data), torch.from_numpy(target)
@@ -74,8 +76,16 @@ class Config:
                   "val": 64,
                   "test": 64}
 
+@dataclass
+class ConfigNESA:
+    verbose = 1
 
-
+    T0 = 0.5
+    T_final = 0
+    max_iters = 10000
+    max_time = 5*60
+    min_delta = 0.01
+    childs = 20
 
 
 ##############################
@@ -96,9 +106,9 @@ class LinearModule(nn.Module):
 class Network(nn.Module):
     def __init__(self, gen):
         super().__init__()
-        self.in_layer = LinearModule(in_size= Config.in_size, out_size=gen[0])
-        self.module_list = nn.ModuleList([LinearModule(in_size = gen[i], out_size= gen[i+1]) for i in range(Config.hidden_layers-1)])
-        self.out_layer = nn.Linear(gen[-1], Config.out_size, bias = False)
+        self.in_layer = LinearModule(in_size= ConfigNEGA.in_size, out_size=gen[0])
+        self.module_list = nn.ModuleList([LinearModule(in_size = gen[i], out_size= gen[i+1]) for i in range(ConfigNEGA.hidden_layers-1)])
+        self.out_layer = nn.Linear(gen[-1], ConfigNEGA.out_size, bias = False)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(1)
 
@@ -107,35 +117,37 @@ class Network(nn.Module):
         for module in self.module_list:
             x = module(x)
         x = self.out_layer(x)
-        if Config.classifier: 
+        if ConfigNEGA.classifier: 
             x = self.softmax(x)
         if targets is None:
             loss = None
         else:
-            if Config.classifier:
+            if ConfigNEGA.classifier:
                _, y = targets.max(dim=1)
                _, y_pred = x.max(dim=1)
                acc = torch.sum(y_pred == y)/len(y)
                loss = nn.CrossEntropyLoss()(x, y)
-               if Config.acc: loss = torch.autograd.Variable(1-acc, requires_grad= True)
+               if ConfigNEGA.acc: loss = torch.autograd.Variable(1-acc, requires_grad= True)
             else:
                 loss = F.mse_loss(x, targets)
         return x, loss
 
 class Individual:
     def __init__(self):
-        self.gen = [random.randint(1, Config.max_neurons) for i in range(Config.hidden_layers)]
+        self.gen = [random.randint(1, ConfigNEGA.max_neurons) for i in range(ConfigNEGA.hidden_layers)]
         self.network = Network(self.gen)
         self.fitness = 0
 
     def __call__(self, x, targets = None):
         return self.network(x, targets)
 
+
+
 ###############################
 #      GENETIC ALGORITHM      #
 ###############################
 
-class GeneticAlgotithm:
+class NEGA:
 
     def __init__(self):
         self.best_evolution = []
@@ -143,7 +155,7 @@ class GeneticAlgotithm:
         self.best_fitness = []
 
 
-    def create_population(self, n = Config.population_size):
+    def create_population(self, n = ConfigNEGA.population_size):
         """
         Creates a population of neural networks
         """
@@ -153,12 +165,11 @@ class GeneticAlgotithm:
         """
         Returns a batch of features and targets from the selected split
         """
-        x, y = Config.splits[split]
+        x, y = ConfigNEGA.splits[split]
         perm = torch.randperm(x.size(0))
-        idx = perm[:Config.batch_size[split]]
+        idx = perm[:ConfigNEGA.batch_size[split]]
         return x[idx], y[idx]
         
-
     @torch.no_grad()
     def evaluate_fitness(self, indiv: Individual, split: {"train", "val", "test"}): 
         """
@@ -166,8 +177,8 @@ class GeneticAlgotithm:
         """
         out = {}
         indiv.network.eval() #sets to evaluation phase, with our model it does nothing
-        losses = torch.zeros(Config.eval_iters)
-        for k in range(Config.eval_iters):
+        losses = torch.zeros(ConfigNEGA.eval_iters)
+        for k in range(ConfigNEGA.eval_iters):
             x, y = self.get_batch(split)
             _, loss = indiv.network(x, y)
             losses[k] = loss.item()
@@ -192,7 +203,7 @@ class GeneticAlgotithm:
             if fit > max_fitness: max_fitness = fit
             if fit < min_fitness: min_fitness = fit
         if top_n:
-            indices = sorted(range(len(res)), key=lambda i: res[i], reverse=True)[:Config.top_n]
+            indices = sorted(range(len(res)), key=lambda i: res[i], reverse=True)[:ConfigNEGA.top_n]
             best_fitness = [copy.deepcopy(res[i]) for i in indices]
             best_population = [copy.deepcopy(population[i]) for i in indices]
             return res, suma, max_fitness, min_fitness, best_fitness, best_population, indices
@@ -206,7 +217,7 @@ class GeneticAlgotithm:
         indiv = copy.deepcopy(individual)
 
         if index is None:
-            idx = random.randint(0, Config.hidden_layers-1)
+            idx = random.randint(0, ConfigNEGA.hidden_layers-1)
         else:
             idx = index
         if new is None:
@@ -215,7 +226,7 @@ class GeneticAlgotithm:
             new_neurons = new
         indiv.gen[idx] += new_neurons
 
-        if idx == Config.hidden_layers-1:
+        if idx == ConfigNEGA.hidden_layers-1:
             indiv.network.out_layer.in_features = indiv.gen[idx]
             j, i = indiv.network.out_layer.weight.shape
             indiv.network.out_layer.weight = nn.Parameter(torch.cat((indiv.network.out_layer.weight, torch.rand(j, new_neurons)), dim = 1))
@@ -241,11 +252,11 @@ class GeneticAlgotithm:
         
         indiv = copy.deepcopy(individual)
 
-        idx = random.randint(0, Config.hidden_layers-1)
+        idx = random.randint(0, ConfigNEGA.hidden_layers-1)
         if indiv.gen[idx] > 1:
             new_neurons = random.randint(1, indiv.gen[idx]-1)
             indiv.gen[idx] -= new_neurons
-            if idx == Config.hidden_layers-1:
+            if idx == ConfigNEGA.hidden_layers-1:
                 indiv.network.out_layer.in_features = indiv.gen[idx]
                 j, i = indiv.network.out_layer.weight.shape
                 indiv.network.out_layer.weight = nn.Parameter(indiv.network.out_layer.weight[:, :i-new_neurons])
@@ -271,9 +282,9 @@ class GeneticAlgotithm:
         Performs a mini classical training process on a neural network
         """
         individual = copy.deepcopy(indiv)
-        optimizer = torch.optim.AdamW(individual.network.parameters(), lr = Config.learning_rate)
+        optimizer = torch.optim.AdamW(individual.network.parameters(), lr = ConfigNEGA.learning_rate)
 
-        for iter in range(Config.train_iters):
+        for iter in range(ConfigNEGA.train_iters):
             xb, yb = self.get_batch("train")
             logits, loss = individual.network(xb, yb)
             optimizer.zero_grad(set_to_none = True)
@@ -331,12 +342,12 @@ class GeneticAlgotithm:
         return child1, child2
 
 
-    def best_selection(self, fitness, n = int(Config.mutation_rate*Config.population_size)):
+    def best_selection(self, fitness, n = int(ConfigNEGA.mutation_rate*ConfigNEGA.population_size)):
         selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(1 - fit) for fit in fitness])), n)
         return sorted(selected.tolist(), reverse= True)
 
     def worst_selection(self, fitness, suma, min_fitness):
-        selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness) for fit in fitness])), 3*int(Config.mutation_rate*Config.population_size) + 2*Config.crossovers)
+        selected = torch.multinomial(nn.Softmax(0)(torch.FloatTensor([(fit - min_fitness) for fit in fitness])), 3*int(ConfigNEGA.mutation_rate*ConfigNEGA.population_size) + 2*ConfigNEGA.crossovers)
         return sorted(selected.tolist(), reverse= True)
 
     def delete_worst(self, selected, population, fitness, suma):
@@ -357,10 +368,10 @@ class GeneticAlgotithm:
         return list(fit[:len(best_fit)]), [copy.deepcopy(pop[i]) for i in indices[:len(best_fit)]], list(fit[len(best_fit):]), [copy.deepcopy(pop[i]) for i in indices[len(best_fit):]]
 
     def destruct_population(self, population, fitness):
-        survivor_indices = random.sample(range(len(population)), Config.survivors)
+        survivor_indices = random.sample(range(len(population)), ConfigNEGA.survivors)
         return [population[i] for i in survivor_indices], [fitness[i] for i in survivor_indices]
 
-    def __call__(self):
+    def __call__(self, save = True):
         population = self.create_population()
         fitness, suma, max_fitness, min_fitness, self.best_fitness, self.best_population, indices = self.evaluate_population(population, top_n = True)
         self.best_evolution = []
@@ -370,11 +381,11 @@ class GeneticAlgotithm:
             fitness.pop()
             population.pop()
 
-        for i in range(Config.num_generations): 
+        for i in range(ConfigNEGA.num_generations): 
 
             new_individuals = []
             tcross1 = time.time()
-            for _ in range(Config.crossovers):
+            for _ in range(ConfigNEGA.crossovers):
                 parents_indices = self.best_selection(fitness + self.best_fitness, n = 2)
                 child1, child2 = self.crossover_encoder_decoder(*((population + self.best_population)[i] for i in parents_indices))
                 new_individuals = new_individuals + [child1, child2]
@@ -411,12 +422,12 @@ class GeneticAlgotithm:
             self.best_evolution.append(min_fitness)
             min_fit_test = self.evaluate_fitness(self.best_population[0], "test")
 
-            if Config.verbose == 1:
+            if ConfigNEGA.verbose == 1:
                 print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst: {max_fitness:.2f}, best in test: {min_fit_test:.2f}, {len(population)}", end = "\r")
             else:
-                if Config.verbose > 1:
+                if ConfigNEGA.verbose > 1:
                     print(f"End of generation {i+1}, best fitness: {min_fitness:.2f}, worst: {max_fitness:.2f}, best in test: {min_fit_test:.2f}, {len(population)}, {self.best_fitness}")
-                if Config.verbose > 2:
+                if ConfigNEGA.verbose > 2:
                     print(f"""Time Analysis:
                 - Time spent on Crossover: {t1-tcross1:.4f}
                 - Time spent on First Selection: {t2-t1:.4f}
@@ -427,16 +438,17 @@ class GeneticAlgotithm:
                 - Time spent comparing new-best: {t9-t8:.4f}
                 - Time spent on Worst Selection: {t11-t10:.4f}
                 - Time spent on deletion: {t12-t11:.4f}""")
-            if min_fitness < Config.limit_val: 
-                if min_fit_test < Config.limit_test: break
+            if min_fitness < ConfigNEGA.limit_val: 
+                if min_fit_test < ConfigNEGA.limit_test: break
 
-        df = pd.DataFrame({"best fitness": self.best_evolution, "iteration": range(1, len(self.best_evolution)+1)})
-        plt.plot(df["iteration"], df["best fitness"])
-        plt.savefig(f"./images/iris_hiddenlayers{Config.hidden_layers}_maxneurons{Config.max_neurons}_population_size{Config.population_size}_mutation_rate{Config.mutation_rate}_crossovers{Config.crossovers}_fitness{min_fitness}_test{min_fit_test}.png")
+        if save:
+            df = pd.DataFrame({"best fitness": self.best_evolution, "iteration": range(1, len(self.best_evolution)+1)})
+            plt.plot(df["iteration"], df["best fitness"])
+            plt.savefig(f"./images/{ConfigNEGA.name_dataset}_hiddenlayers{ConfigNEGA.hidden_layers}_maxneurons{ConfigNEGA.max_neurons}_population_size{ConfigNEGA.population_size}_mutation_rate{ConfigNEGA.mutation_rate}_crossovers{ConfigNEGA.crossovers}_fitness{min_fitness}_test{min_fit_test}.png")
 
-        torch.save(self.best_population[0].network, f"./models/iris_{min_fitness}.pt")
-        with open("./models/genes.txt", "a") as f:
-            f.write(f'iris_{min_fitness}.pt' + ": " + str(self.best_population[0].gen))
+            torch.save(self.best_population[0].network, f"./models/{ConfigNEGA.name_dataset}_{min_fitness}.pt")
+            with open("./models/genes.txt", "a") as f:
+                f.write(f'{ConfigNEGA.name_dataset}_{min_fitness}.pt' + ": " + str(self.best_population[0].gen))
 
         return self.best_population, self.best_fitness
 
@@ -447,12 +459,81 @@ class GeneticAlgotithm:
         df = pd.DataFrame({"best fitness": self.best_evolution, "iteration": range(1, len(self.best_evolution)+1)})
         plt.plot(df["iteration"], df["best fitness"])
 
+###############################
+#     SIMULATED ANNEALING     #
+###############################
 
+class NESA:
+    def __init__(self):
+        self.T0 = ConfigNESA.T0
+        self.time_spent = 0
+        self.ga = NEGA()
+        self.ratio = (ConfigNESA.T0 - ConfigNESA.T_final)/ConfigNESA.max_iters
+        self.sol_act = None
+        self.fit_act = 1
+
+    def length(self, temperature):
+        return ConfigNESA.childs
+
+    def new_solution(self, solution):
+        idx = random.randint(0, 2)
+        if idx == 0:
+            return self.ga.mutation_add_neuron(solution)
+        elif idx == 1:
+            return self.ga.mutation_remove_neuron(solution)
+        else:
+            return self.ga.mutation_mini_train(solution)
+
+    def update(self, temperature, iterations):
+        return temperature - iterations*self.ratio
+    
+    def get_best(self):
+        return self.sol_act, self.fit_act
+
+    def __call__(self, use_NEGA = True, solucion_inicial = None):
+        T_act = self.T0
+        iterations = 0
+        t0 = time.time()
+        t1 = time.time()
+        self.time_spent = t1-t0
+        if use_NEGA:
+            best_population, best_fitness = self.ga(save = False)
+            self.sol_act = best_population[0]
+            self.fit_act = float(best_fitness[0])
+        else:
+            assert solucion_inicial is not None
+            self.sol_act = solucion_inicial[0]
+            self.fit_act = float(solucion_inicial[1])
+
+        while (self.fit_act > ConfigNESA.min_delta
+               and iterations < ConfigNESA.max_iters 
+               and T_act > ConfigNESA.T_final
+               and self.time_spent < ConfigNESA.max_time):
+            
+            
+            for count in range(self.length(T_act)):
+                sol_cand = self.new_solution(self.sol_act)
+                fit_cand = float(self.ga.evaluate_fitness(sol_cand, "val"))
+
+                delta = fit_cand - self.fit_act
+                if (delta < 0 or random.random() < math.e**(-delta/T_act)):
+                    self.sol_act = sol_cand
+                    self.fit_act = fit_cand
+            if ConfigNESA.verbose > 0:
+                print(f"NESA: End of iteration {iterations}, Actual solution fitness: {self.fit_act}")
+                print(delta > ConfigNESA.min_delta)
+                print(iterations < ConfigNESA.max_iters) 
+                print(T_act > ConfigNESA.T_final)
+                print(self.time_spent < ConfigNESA.max_time)
+            iterations += 1
+            T_act = self.update(T_act, iterations=iterations)
+
+        return self.sol_act, self.fit_act
 
 ##############################
 #         MAIN LOOP          #
 ##############################
 
 if __name__ == "__main__":
-    ga = GeneticAlgotithm()
-    ga()
+    sa = NESA()
+    print(sa())
