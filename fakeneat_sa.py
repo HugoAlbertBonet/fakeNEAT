@@ -37,7 +37,7 @@ class ConfigNEGA:
     hidden_layers = 5                                   # Number of hidden layers per network
     max_neurons = 500                                   # Max number of neurons per layer in inicialization
     population_size = 100                               # Size of population
-    num_generations = 2000                              # Max number of iterations of genetic algorithm
+    num_generations = 150                              # Max number of iterations of genetic algorithm
     mutation_rate = 0.1                                 # Proportion of individuals of population suffering mutations
     top_n = 3                                           # Number of best results to keep from disappearing
     survivors = int(0.5*population_size)                # In case destruction of pupulation is implemented, how many survivors
@@ -536,5 +536,5 @@ class NESA:
 ##############################
 
 if __name__ == "__main__":
-    ga = NEGA()
-    ga()
+    sa = NESA()
+    print(sa())
