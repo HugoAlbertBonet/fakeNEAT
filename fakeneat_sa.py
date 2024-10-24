@@ -85,7 +85,7 @@ class ConfigNESA:
     max_iters = 3000
     max_time = 5*60
     min_delta = 0.01
-    childs = 50
+    childs = 20
 
 
 ##############################
@@ -490,7 +490,9 @@ class NESA:
     def get_best(self):
         return self.sol_act, self.fit_act
 
-    def __call__(self, use_NEGA = True, solucion_inicial = None):
+    def __call__(self, use_NEGA = True, solucion_inicial = None, save = True):
+        self.best_evolution = []
+        t_ini = time.time()
         T_act = self.T0
         iterations = 0
         t0 = time.time()
@@ -519,16 +521,27 @@ class NESA:
                 if (delta < 0 or random.random() < math.e**(-delta/T_act)):
                     self.sol_act = sol_cand
                     self.fit_act = fit_cand
+                self.best_evolution.append(self.fit_act)
             if ConfigNESA.verbose > 0:
-                print(f"NESA: End of iteration {iterations}, Current solution fitness: {self.fit_act:.2f}, {idx}")
+                min_fit_test = self.ga.evaluate_fitness(self.sol_act, "test")
+                print(f"NESA: End of iteration {iterations}, Current solution fitness: {self.fit_act:.2f}, {idx}, test: {min_fit_test}")
             iterations += 1
             T_act = self.update(T_act, iterations=iterations)
 
         
-        print(self.fit_act > ConfigNESA.min_delta)
-        print(iterations < ConfigNESA.max_iters) 
-        print(T_act > ConfigNESA.T_final)
-        print(self.time_spent < ConfigNESA.max_time)
+        #print(self.fit_act > ConfigNESA.min_delta)
+        #print(iterations < ConfigNESA.max_iters) 
+        #print(T_act > ConfigNESA.T_final)
+        #print(self.time_spent < ConfigNESA.max_time)
+        
+        min_fit_test = self.ga.evaluate_fitness(self.sol_act, "test")
+        t_fin = time.time()
+        print(f"{t_fin - t_ini:.2f} seconds")
+
+        if save:
+            df = pd.DataFrame({"best fitness": self.best_evolution, "iteration": range(1, len(self.best_evolution)+1)})
+            plt.plot(df["iteration"], df["best fitness"])
+            plt.savefig(f"./images/SA_{ConfigNEGA.name_dataset}_mindelta{ConfigNESA.min_delta}_childs{ConfigNESA.childs}_temperatureLinear_T0{ConfigNESA.T0}_fitness{self.fit_act}_test{min_fit_test}.png")
         return self.sol_act, self.fit_act
 
 ##############################

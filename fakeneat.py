@@ -372,6 +372,7 @@ class NEGA:
         return [population[i] for i in survivor_indices], [fitness[i] for i in survivor_indices]
 
     def __call__(self, save = True):
+        t_ini = time.time()
         population = self.create_population()
         fitness, suma, max_fitness, min_fitness, self.best_fitness, self.best_population, indices = self.evaluate_population(population, top_n = True)
         self.best_evolution = []
@@ -450,6 +451,8 @@ class NEGA:
             with open("./models/genes.txt", "a") as f:
                 f.write(f'{ConfigNEGA.name_dataset}_{min_fitness}.pt' + ": " + str(self.best_population[0].gen))
 
+        t_fin = time.time()
+        print(f"Time spent on evolution: {t_fin-t_ini:.4f} seconds")
         return self.best_population, self.best_fitness
 
     def get_best(self):
